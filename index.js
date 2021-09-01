@@ -4,6 +4,8 @@ const StopIteration = Symbol()
 const inside = xs => x => xs.includes(x)
 const outside = xs => x => !xs.includes(x)
 const whitespace = ' \n\t\r'
+const K = x => () => x
+const any_symbol = K(true)
 
 function unexpected_token(x) { throw `unexpected token at ${x.i}: ${x.x[x.i-1]}` }
 function end_of_stream() { throw 'unexpected end of stream' }
@@ -19,12 +21,20 @@ class Stream {
 	done() { return this.i >= this.len }
 	revert(i=1) { this.i -= i ; return this }
 
-	until(f) {
+	expect(f) {
+		const x = this.next()
+		if (x === StopIteration) end_of_stream()
+		else if (f(x)) return x
+		else unexpected_token(x)
+	}
+
+	until(f, err=true) {
 		while(!this.done()) {
 			const x = this.next()
 			if (f(x)) return x
 		}
-		return StopIteration
+		if (err) end_of_stream()
+		else return StopIteration
 	}
 }
 
@@ -39,7 +49,7 @@ function parse(x) {
 }
 
 function parse_sexp(xs) {
-	const x = xs.until(outside(whitespace))
+	const x = xs.until(outside(whitespace), false)
 	switch(x) {
 		case StopIteration:
 			return StopIteration
@@ -62,9 +72,6 @@ function parse_expression(xs) {
 	while (true) {
 		const x = xs.until(outside(whitespace))
 		switch(x) {
-			case StopIteration:
-				end_of_stream()
-				break
 			case '(':
 				exp.push(parse_expression(xs))
 				break
@@ -80,6 +87,26 @@ function parse_expression(xs) {
 }
 
 function parse_atom(xs) {
+	const x = xs.next()
+	if (x === '"') return parse_string(xs)
+	else {
+		xs.revert()
+		return parse_symbol(xs)
+	}
+}
+
+function parse_string(xs) {
+	const atom = []
+	while(true) {
+		const x = xs.expect(any_symbol)
+		if (x === '"') break
+		else if (x === '\\') atom.push(xs.expect(any_symbol))
+		else atom.push(x)
+	}
+	return '"' + atom.join('') + '"'
+}
+
+function parse_symbol(xs) {
 	const atom = []
 	while (true) {
 		const x = xs.next()
@@ -88,11 +115,9 @@ function parse_atom(xs) {
 		else if (x === '(' || x === ')') {
 			xs.revert()
 			break
-		} else if (x === '\\') {
-			const y = xs.next()
-			if (y === StopIteration) end_of_stream()
-			else atom.push(y)
-		} else atom.push(x)
+		} else if (x === '\\')
+			atom.push(xs.expect(K(true)))
+		else atom.push(x)
 	}
 	return atom.join('')
 }
